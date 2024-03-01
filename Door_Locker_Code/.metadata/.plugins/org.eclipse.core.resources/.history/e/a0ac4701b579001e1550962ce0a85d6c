@@ -1,0 +1,76 @@
+ /******************************************************************************
+ * 																			   *
+ * 					Author: Abdelrhman Khaled Sobhi			     			   *
+ *																			   *
+ * 								Group : 79								       *
+ *																			   *
+ *******************************************************************************/
+
+
+#ifndef I2C_H_
+#define I2C_H_
+
+#include "std_types.h"
+
+/*******************************************************************************
+ |                                Definitions                                  |
+ *******************************************************************************/
+
+/* I2C Status Bits in the TWSR Register */
+#define I2C_START         0x08 /* start has been sent */
+#define I2C_REP_START     0x10 /* repeated start */
+#define I2C_MT_SLA_W_ACK  0x18 /* Master transmit ( slave address + Write request ) to slave + ACK received from slave. */
+#define I2C_MT_SLA_R_ACK  0x40 /* Master transmit ( slave address + Read request ) to slave + ACK received from slave. */
+#define I2C_MT_DATA_ACK   0x28 /* Master transmit data and ACK has been received from Slave. */
+#define I2C_MR_DATA_ACK   0x50 /* Master received data and send ACK to slave. */
+#define I2C_MR_DATA_NACK  0x58 /* Master received data but doesn't send ACK to slave. */
+
+/*******************************************************************************
+ | 							Structures and Enumerators			   		       |
+ *******************************************************************************/
+
+typedef enum{
+	/*
+	 * The value will be put in TWBR register will be calculated from the
+	 * equation of SCL Frequency then the value is:
+	 * 	(450 : 500) KHZ ---value in TWBR---> TWBR = 0
+	 *  400 KHZ 		---value in TWBR---> TWBR = 2
+	 *  300 KHZ 		---value in TWBR---> TWBR = 6
+	 *  250 KHZ 		---value in TWBR---> TWBR = 8
+	 * 	200 KHZ 		---value in TWBR---> TWBR = 12
+	 * 	160 KHZ 		---value in TWBR---> TWBR = 17
+	 *	100 KHZ 		---value in TWBR---> TWBR = 32
+	 *
+	 */
+	Buad_Rate_500KHZ,
+	Buad_Rate_400KHZ = 2,
+	Buad_Rate_300KHZ = 6,
+	Buad_Rate_250KHZ = 8,
+	Buad_Rate_200KHZ = 12,
+	Buad_Rate_160KHZ = 17,
+	Buad_Rate_100KHZ = 32,
+}TWI_BaudRate;
+
+typedef struct{
+ uint8 address;
+ TWI_BaudRate bit_rate;
+}TWI_ConfigType;
+
+/*******************************************************************************
+ *                            Functions Prototypes                             *
+ *******************************************************************************/
+void TWI_init(const TWI_ConfigType * Config_Ptr);
+
+void TWI_start(void);
+
+void TWI_stop(void);
+
+void TWI_writeByte(uint8 data);
+
+uint8 TWI_readByteWithACK(void);
+
+uint8 TWI_readByteWithNACK(void);
+
+uint8 TWI_getStatus(void);
+
+#endif /* I2C_H_ */

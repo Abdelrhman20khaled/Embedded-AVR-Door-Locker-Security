@@ -1,0 +1,22 @@
+/*
+ * flags_command.h
+ *
+ *  Created on: 4 Nov 2023
+ *      Author: AbdoS
+ */
+
+#ifndef FLAGS_COMMAND_H_
+#define FLAGS_COMMAND_H_
+
+#define MATCHED                                               	1
+
+#define NOT_MATCHED                                             0
+
+#define PASSWORD_ONE_IS_RESIVED_Q								'O'
+
+#define PASSWORD_TWO_IS_RESIVED_Q								'T'
+
+#define ASK_UART_ABOUT_MATCHING_PASSWORDS					    'A'
+
+
+#endif /* FLAGS_COMMAND_H_ */

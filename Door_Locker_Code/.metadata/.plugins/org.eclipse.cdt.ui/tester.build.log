@@ -1,0 +1,7 @@
+17:24:54 **** Incremental Build of configuration Debug for project tester ****
+make all 
+make: *** No rule to make target `dc_motor.o', needed by `tester.elf'.  Stop.
+"make all" terminated with exit code 2. Build might be incomplete.
+
+17:24:54 Build Failed. 1 errors, 0 warnings. (took 191ms)
+

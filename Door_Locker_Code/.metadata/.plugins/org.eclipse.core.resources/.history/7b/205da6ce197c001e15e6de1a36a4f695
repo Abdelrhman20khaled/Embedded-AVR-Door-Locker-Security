@@ -1,0 +1,592 @@
+/*******************************************************************************
+ * 					Human Machine Interface Micro-controller				   *
+ *																			   *
+ * 					Author: Abdelrhman Khaled Sobhi			     			   *
+ *																			   *
+ * 								Group : 79								       *
+ *																			   *
+ *******************************************************************************/
+
+#include "lcd.h"           /*for using LCD function and interface with it */
+#include "keypad.h"        /*for using keypad function and interface with it */
+#include "uart.h"          /*for using UART function and interface with it */
+#include "gpio.h"          /*for using PINS and Ports function and interface with it */
+#include "timer1.h"        /*for using timer or counter function and interface with it */
+#include "util/delay.h"    /*for using some time delays in the program*/
+#include "avr/io.h" 	   /*for using the register names*/
+#include "flags_command.h" /*for using commands when interfacing with UART*/
+
+/*******************************************************************************
+ | 								Global Variables                               |
+ *******************************************************************************/
+
+uint8 password_arr[5]; /* the array store the password in it */
+
+uint8 re_enterd_password_arr[5]; /* the array store the re-enterd password in it */
+
+uint8 timer_lcd_tick=0; /* this for calculate the time for LCD from timer */
+
+
+
+/*******************************************************************************
+| 							    Some Functions                            	   |
+ *******************************************************************************/
+
+/*
+ * Description:
+ * this function display the first sentence on LCD " plz enter password"
+ * and then move cursor to the next line at column zero.
+ *
+ */
+void Start_Screen(void){
+
+	LCD_clearScreen();
+
+	LCD_displayString("Plz Enter Pass:");
+
+	LCD_moveCursor(1,0);
+}/*End of the function*/
+
+/*
+ * Description:
+ * this function display the first sentence on LCD " Plz Re-Enter The "
+ * and then move cursor to the next line at column zero to continue the sentence
+ * and then take a password.
+ *
+ */
+void Re_Enter_Password_Screen(void){
+	LCD_clearScreen();
+
+	LCD_displayString("Plz Re-Enter The ");
+
+	LCD_moveCursor(1,0);
+
+	LCD_displayString("Same Pass:");
+}/*End of the function*/
+
+/*
+ * Description:
+ * this function display the menu after the user enter the correctly password
+ * for opening the door or change password.
+ *
+ */
+void Menu_Screen(void){
+
+	LCD_displayString("+ : Open Door");
+	LCD_moveCursor(1,0);
+	LCD_displayString("- : Change Pass");
+
+}/*End of the function*/
+
+/*
+ * Description:
+ * this function take an address of the array also it local or global array
+ * and loop on it array to fill it with all keys that user entered as a password,
+ * and at the end of the loop (that means user entered all of password digits) there
+ * was a delay for avoid faults in simulation, then the function not exit or ended
+ * until the user enter equal button
+ *
+ *
+ */
+void fill_array_of_password(uint8 *arr){
+
+	uint8 i;
+	for(i=0 ; i<5;i++){
+		arr[i] = KEYPAD_getPressedKey();
+		if(arr[i] >= 0 && arr[i] <= 9){
+			LCD_intgerToString(arr[i]);
+		}else{
+			i--;
+		}
+		_delay_ms(500);
+	}
+	while(KEYPAD_getPressedKey() != 61);
+}/*End of the function*/
+
+/*
+ * Description:
+ * this function for make the code more easier or more readable that take the of
+ * keys (password) that user entered from keypad and then send it to UART as array
+ * of bytes.
+ *
+ */
+void uart_send_password (uint8 *arr){
+	for(uint8 i =0; i<5; i++){
+		UART_sendByte(arr[i]);
+	}
+}/*End of the function*/
+
+/*
+ * Description:
+ * this function receive the bytes from the UART byte by byte as an array of bytes
+ * for make a code more easier and readable, that receive the bytes from the UART and
+ * store it in the array that given to it by address to keep it is element safe through
+ * the program.
+ *
+ */
+
+void uart_receive_password(uint8 *arr){
+	for(uint8 j=0 ; j<5;j++){
+		arr[j] = UART_recieveByte();
+	}
+}/*End of the function*/
+
+/*******************************************************************************
+ | 							  Callback Functions                               |
+ *******************************************************************************/
+
+/*
+ * Description:
+ * this callback function was put and defined in the timer1 driver when the interrupt
+ * happen this function called by it is pointer that point to first line in it, when
+ * interrupt happen the function will increase the number of ticks that means count ticks
+ * until the program needed.
+ *
+ */
+
+void lcd_un_locking_callback (void){
+	/*tick used for LCD in ERROR case and when open the door*/
+	timer_lcd_tick++;
+}
+
+
+/*******************************************************************************
+| 							Start of Main Function                              |
+ *******************************************************************************/
+
+int main(){
+
+	/*For Enable the Global interrupt bit ( I - BIT)*/
+	SREG |=(1<<7);
+
+	/*******************************************************************************
+	 | 								Local Variables                                |
+	 *******************************************************************************/
+
+	/*
+	 * array used to store the new key entered by user in first time for checking
+	 * with the second one, it used when the user want the change password.
+	 *
+	 */
+	uint8 new_password_array1[5];
+	/*
+	 * array used to store the new key entered by user in second time for checking
+	 * with the first one, it used when the user want the change password.
+	 *
+	 */
+	uint8 new_password_array2[5];
+	/*
+	 * this variable for store the choice that user need in it from keypad
+	 * it take on of two cases ('+') or ('-') only.
+	 *
+	 */
+	uint8 menu_key = 0;
+	/*
+	 * this variable as a flag set to one when the UAART receive the first password and
+	 * send to device that it receive it.
+	 *
+	 */
+	uint8 password_one_received = 0;
+	/*
+	 * this variable as a flag set to one when the UAART receive the first password and
+	 * send to device that it receive it.
+	 *
+	 */
+	uint8 password_two_received = 0;
+	/*
+	 * this variable as a flag set to one when the UAART receive the first password and
+	 * second password then check equality of them and return the result.
+	 *
+	 */
+	uint8 two_password_were_matched = NOT_MATCHED;
+	/*
+	 * This variable used for clearing the arrays to use in next operations.
+	 */
+	uint8 i_clear=0;
+	/*
+	 * this variable used for store the response of UART about checking the two
+	 * passwords and open the door if this password matched.
+	 *
+	 */
+	uint8 password_for_door=0;
+	/*
+	 * this variable used for checking on the old password that the user enter before
+	 * changing the password or enter the new password
+	 *
+	 */
+	uint8 check_pass_before_changed=0;
+	/*
+	 * this variable for checking that the first array of keys (password) that
+	 * user entered for first time was received
+	 *
+	 */
+	uint8 check_new_pass_array1_received = 0;
+	/*
+	 * this variable for checking that the second array of keys (password) that
+	 * user entered for second time was received
+	 *
+	 */
+	uint8 check_new_pass_array2_received = 0;
+	/*
+	 * this variable used as flag for checking if the two passwords that were entered by
+	 * the user before change password.
+	 *
+	 */
+	uint8 check_equality_of_two_new_passwords = 0;
+	/*
+	 * this variable used for checking how many tries that user has to enter the password
+	 * if user enter the password 3 times wrong it will implement the specific condition,
+	 * it used when the user want to change password.
+	 *
+	 */
+	uint8 number_of_tries_to_set_password = 3;
+	/*
+	 * this variable used for checking how many tries that user has to enter the password
+	 * if user enter the password 3 times wrong it will implement the specific condition,
+	 * it used when the user want to open the door.
+	 *
+	 */
+	uint8 number_of_tries_to_open_the_door = 3;
+
+	/*******************************************************************************
+	 | 		Configurable Structure Will be Passed to Initialization Function 	   |
+	 *******************************************************************************/
+
+	/*
+	 * UART configuration :
+	 * 	1- The frame of data is 8 bit frame.
+	 * 	2- Not using parity check bit.
+	 *	3- Using 1 stop bit.
+	 * 	4- Using Baud rate 9600.
+	 *
+	 */
+	UART_ConfigType uart_config_HMI = {Frame_8_bit,Parity_Disable,Stop_1_bit,Buad_Rate_9600};
+
+	/*
+	 * Timer 1 configuration :
+	 * 	1- Do not use normal mode so put zero in it.
+	 * 	2- put compare value in OCR1A from the equation of timer 1, put value = 7812.
+	 * 	3- using prescalar 1024.
+	 * 	4- Using mode of the timer it will be : Compare Mode.
+	 *
+	 */
+
+	Timer1_ConfigType timer_config_HMI = {0,7812,Prescalar_1024,Compare_Mode};;
+
+	/*******************************************************************************
+	 | 							Initialization Functions                           |
+	 *******************************************************************************/
+
+	/* this function prepare the UART to work with the uart_config_HMI inputs*/
+	UART_init(&uart_config_HMI);
+
+	/* this function prepare the TIMER1 to work with the timer_config_HMI inputs*/
+	Timer1_init(&timer_config_HMI);
+
+	/*this function for initialize the LCD before using to*/
+	LCD_init();
+
+	/*******************************************************************************
+ 	 | 							Setup Callback Functions                           |
+	 *******************************************************************************/
+
+	/*the callback function that defined before */
+	Timer1_setCallBack(lcd_un_locking_callback);
+
+
+	/*============================================================================*/
+
+	while(1){/*Parent While(1)*/
+
+		/*******************************************************************************
+		 | 								 Keypad Interface                              |
+		 *******************************************************************************/
+
+		/*
+		 * the loop check the flag modified from UART if the two passwords were matched
+		 * or not, if matched move to next step or enter the system.
+		 */
+		while(two_password_were_matched == NOT_MATCHED){ /*start of while check two passwords*/
+
+			Start_Screen();/*print the first sentence*/
+
+			fill_array_of_password(password_arr);/*send first array*/
+
+			UART_sendByte(PASSWORD_ONE_IS_RESIVED_Q);/*tell UART that you want to send to it*/
+
+			uart_send_password(password_arr); /*then send to next device the password by UART*/
+
+			password_one_received = UART_recieveByte();/*Flag to receive the response of UART*/
+
+			while(password_one_received == 0){}/*Wait until UART modify the flag to move to next step*/
+
+
+			Re_Enter_Password_Screen();/*display it to print the next password*/
+
+			fill_array_of_password(re_enterd_password_arr);/*send second array*/
+
+			UART_sendByte(PASSWORD_TWO_IS_RESIVED_Q);/*tell UART that you want to send to it*/
+
+			uart_send_password(re_enterd_password_arr);/*then send to next device the password by UART*/
+
+			password_two_received = UART_recieveByte();/*Flag to receive the response of UART*/
+
+			while(password_two_received == 0){}/*Wait until UART modify the flag to move to next step*/
+
+
+
+			UART_sendByte(ASK_UART_ABOUT_MATCHING_PASSWORDS);/*tell the next device that you want to check equality of two passwords*/
+			two_password_were_matched = UART_recieveByte();/*flag for receiving response of UART about equality and check on this flag for move to next step*/
+
+		}/*End of while check two passwords*/
+
+		/*this loop for clearing the temporary arrays for use it in many next operation*/
+		for(i_clear=0;i_clear<5;i_clear++){
+			password_arr[i_clear]=0;
+			re_enterd_password_arr[i_clear]=0;
+		}
+
+		LCD_clearScreen();/*if the two passwords are matched clear the screen to next step*/
+
+		Menu_Screen();/*enter to the system and print the menu*/
+
+		menu_key = KEYPAD_getPressedKey();/*take choice from user*/
+
+		switch(menu_key){ /*check which button user entered*/
+
+		case '+':
+
+			while( password_for_door != PASS_FETCH_IS_CORRECT){/*check on this flag if set, exit it */
+
+				Start_Screen(); /*ask the user for enter password*/
+
+				fill_array_of_password(re_enterd_password_arr);/*receive password from user*/
+
+				UART_sendByte(SENDED_DATA_MATCHES_EEPROM);/*tell the another device that you want to send*/
+
+				uart_send_password(re_enterd_password_arr);/*send the password*/
+
+				password_for_door = UART_recieveByte(); /*check about flag if set or not */
+
+				/*
+				 * this check if the user enter wrong password in the first time give him
+				 * three tries again to enter password if the three tries ended break the
+				 * loop and exit to implement the next code
+				 */
+
+				if(number_of_tries_to_open_the_door<=0){
+					break;
+				}
+				else{
+					number_of_tries_to_open_the_door --;
+				}
+
+			}/*End of While Loop*/
+
+			/*
+			 * this check condition for check that the user exit the loop because he
+			 * do not enter the correct password for three times or because the flag
+			 * set by the another device and send to this device by UART:
+			 *
+			 * 1- if the user exit the loop because he could not enter the correct password
+			 * 	  the if condition will be implemented by send to another device to turn on
+			 * 	  the alarm and this device display error message on LCD for a minute, then
+			 * 	  return the number of tries to 3 again for next operation.
+			 * 2- if the user exit the loop because the flag is set by another device through
+			 *    UART the else condition will be implemented and the door will be  opened.
+			 *
+			 *
+			 */
+			if(number_of_tries_to_open_the_door <=0){
+
+				UART_sendByte(ATTENTION_MODE);/*tell another device to turn buzzer on*/
+
+				number_of_tries_to_open_the_door =3;/*return number of tries to 3 again for next operation*/
+
+				Timer1_init(&timer_config_HMI);/* set the timer for count time*/
+
+				LCD_clearScreen(); /*clear screen for displaying error message*/
+
+				while(timer_lcd_tick != 60){/*display for a minute*/
+
+					LCD_moveCursor(0,4);
+					LCD_displayString("Error ..");
+					LCD_moveCursor(1,3);
+					LCD_displayString("Warning -_-!");
+
+				}
+				timer_lcd_tick =0; /*reset the ticks to zero for using timer in new count */
+				Timer1_deInit();/*stop the timer*/
+
+
+			}
+			else{/*enter here if the loop ended by the flag*/
+
+				UART_sendByte(DOOR_IS_OPEN);/*tell the another device to open the door*/
+
+				Timer1_init(&timer_config_HMI);/*set timer for counting time*/
+				LCD_clearScreen();/*clear screen for display door state*/
+				LCD_moveCursor(0,0);
+				LCD_displayString("Unlocking ..");
+				while( timer_lcd_tick != 15){}/*wait until 15 second finished*/
+				timer_lcd_tick=0;/*reset the ticks to zero for using motor in more operations*/
+				Timer1_deInit();/*stop timer*/
+
+				LCD_clearScreen();/*clear screen for display door state*/
+				Timer1_init(&timer_config_HMI);/*set timer for counting time*/
+				LCD_moveCursor(0,0);
+				LCD_displayString("HOLDING ..");
+				while( timer_lcd_tick != 3){}/*wait until 3 second finished*/
+				timer_lcd_tick=0;/*reset the ticks to zero for using motor in more operations*/
+				Timer1_deInit();/*reset the ticks to zero for using motor in more operations*/
+
+				LCD_clearScreen();/*clear screen for display door state*/
+				Timer1_init(&timer_config_HMI);/*set timer for counting time*/
+				LCD_moveCursor(0,0);
+				LCD_displayString("Locking ..");
+				while( timer_lcd_tick != 15){}/*wait until 15 second finished*/
+				timer_lcd_tick=0;/*reset the ticks to zero for using motor in more operations*/
+				Timer1_deInit();/*reset the ticks to zero for using motor in more operations*/
+
+			}
+
+			break;
+
+		case '-':
+
+
+			while(check_pass_before_changed != CORRECT_PASSWORD){/*check flag for change password */
+
+				Start_Screen();/*ask user for enter the password*/
+
+				fill_array_of_password(password_arr);/*store the key input*/
+
+				UART_sendByte(CHANGE_PASSWORD);/*prepare UART*/
+
+				uart_send_password(password_arr);/*send password to another device to compare it by old one entered before */
+
+				check_pass_before_changed = UART_recieveByte();/*receive the flag state from another device*/
+
+				/*
+				 * this check if the user enter wrong password in the first time give him
+				 * three tries again to enter password if the three tries ended break the
+				 * loop and exit to implement the next code
+				 */
+				if(number_of_tries_to_set_password <=0){
+					break;
+				}
+				else{
+					number_of_tries_to_set_password --;
+				}
+
+			}
+			/*
+			 * this check condition for check that the user exit the loop because he
+			 * do not enter the correct password for three times or because the flag
+			 * set by the another device and send to this device by UART:
+			 *
+			 * 1- if the user exit the loop because he could not enter the correct password
+			 * 	  the if condition will be implemented by send to another device to turn on
+			 * 	  the alarm and this device display error message on LCD for a minute, then
+			 * 	  return the number of tries to 3 again for next operation.
+			 * 2- if the user exit the loop because the flag is set by another device through
+			 *    UART the else condition will be implemented and the user able to change the password.
+			 *
+			 */
+
+			if(number_of_tries_to_set_password <=0){
+
+				UART_sendByte(ATTENTION_MODE);/*send to another device to turn on the buzzer*/
+
+				number_of_tries_to_set_password =3;/*reset number to tries to 3 for next operation*/
+
+				Timer1_init(&timer_config_HMI);/*set timer to start count*/
+
+				LCD_clearScreen();/*clear screen for display specific sentence*/
+
+				while(timer_lcd_tick != 60){/*wait a minute until return back to laast screen*/
+
+					LCD_moveCursor(0,4);
+					LCD_displayString("Error ..");
+					LCD_moveCursor(1,3);
+					LCD_displayString("Warning -_-!");
+
+				}
+				timer_lcd_tick =0;/*reset tick to zero for next counting*/
+				Timer1_deInit();/*stop timer*/
+			}
+			else{/*this else will be implemented when the loop exit by flag*/
+				LCD_clearScreen();
+
+				LCD_moveCursor(0,1);
+
+				LCD_displayString("You Can Change");
+
+				LCD_moveCursor(1,2);
+
+				LCD_displayString("Password Now");
+
+				_delay_ms(2000);
+
+				while(check_equality_of_two_new_passwords == NOT_MATCHED){/*check that two password are equal before change password*/
+
+					Start_Screen();/*ask user to enter password*/
+
+					fill_array_of_password(new_password_array1);/*store array of keys from user*/
+
+					UART_sendByte(CHECK_FIRST_NEW_PASSWORD); /*tell another device that you want to sent*/
+
+					uart_send_password(new_password_array1);/*send first password*/
+
+					check_new_pass_array1_received = UART_recieveByte();/*check if another device receive the first password*/
+
+					while(check_new_pass_array1_received != 1){};/*wait until the control ECU receive the password and answer*/
+
+
+					Re_Enter_Password_Screen();/*till user to enter the password again*/
+
+					fill_array_of_password(new_password_array2);/*send the second password again*/
+
+					UART_sendByte(CHECK_SECONDE_NEW_PASSWORD);/*tell UART hat you want to send*/
+
+					uart_send_password(new_password_array2);/*send password to user*/
+
+					check_new_pass_array2_received = UART_recieveByte();/*check if another device receive the second password*/
+
+					while(check_new_pass_array2_received != 1){};/*wait until the control ECU receive the password and answer*/
+
+
+					UART_sendByte(CHECK_TWO_NEW_PASSWORD_ARE_EQUAL);/*tell another device to check equal of two passwords and store them in external EEPROM*/
+
+					check_equality_of_two_new_passwords = UART_recieveByte();/*check on this flag to exit loop or not if they were matched */
+
+				}
+				/*
+				 * if the two new passwords are matched display on the screen that the
+				 * password Successfully changed.
+				 *
+				 */
+				LCD_clearScreen();
+
+				LCD_moveCursor(0,0);
+
+				LCD_displayString("Password Changed");
+
+				LCD_moveCursor(1,2);
+
+				LCD_displayString("Successfully");
+
+				_delay_ms(4000);/*wait 4 second before return system screen*/
+
+			}
+
+			break;
+
+		}
+
+
+	}/*End of Parent While(1)*/
+
+		}/*End of Main function*/
+
+

@@ -1,0 +1,22 @@
+/*
+ * flags_commom.h
+ *
+ *  Created on: 4 Nov 2023
+ *      Author: AbdoS
+ */
+
+#ifndef FLAGS_COMMOM_H_
+#define FLAGS_COMMOM_H_
+
+#include "std_types.h"
+
+uint8 password_activated_flag;
+
+#define ACTIVATED  1
+
+#define NOT_ACTIVATED 0
+
+#define ADDRESS_SAVE_PASSWORD_IN_EEPROM  0X0311
+
+
+#endif /* FLAGS_COMMOM_H_ */

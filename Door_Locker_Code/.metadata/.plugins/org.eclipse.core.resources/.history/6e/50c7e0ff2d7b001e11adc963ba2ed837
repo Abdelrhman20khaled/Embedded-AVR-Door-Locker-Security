@@ -1,0 +1,17 @@
+/*
+ * flags_command.h
+ *
+ *  Created on: 4 Nov 2023
+ *      Author: AbdoS
+ */
+
+#ifndef FLAGS_COMMAND_H_
+#define FLAGS_COMMAND_H_
+
+#define PREPARE_UART_TO_SEND_FIRST_PASSWORD     'F'
+
+#define PREPARE_UART_TO_SEND_SECOND_PASSWORD   	'S'
+
+#define PREPARE_UART_TO_SEND_MATCHED            'M'
+
+#endif /* FLAGS_COMMAND_H_ */

@@ -1,0 +1,457 @@
+/*******************************************************************************
+ * 				 	 		Control ECU Micro-controller					   *
+ *																			   *
+ * 						Author: Abdelrhman Khaled Sobhi			     		   *
+ *																			   *
+ * 									Group : 79								   *
+ *																			   *
+ *******************************************************************************/
+
+#include "buzzer.h"           /*for using all buzzer function and interface with it*/
+#include "dc_motor.h"         /*for using all motor function and interface with it*/
+#include "timer1.h"           /*for using all timer1 function and interface with it*/
+#include "uart.h"             /*for using all UART function and interface with it*/
+#include "i2c.h"              /*for using all I2C function and interface with it*/
+#include "external_eeprom.h"  /*for using all EEPROM function and interface with it*/
+#include "util/delay.h"       /*for using all delay function and interface with it*/
+#include "avr/io.h"           /*for using all AVR function and interface with it*/
+#include "flags_command.h"    /*for using all command and interface with UART*/
+
+/*******************************************************************************
+| 								Global Variables                               |
+ *******************************************************************************/
+
+uint8 received_pass_arr[5]; /*the array store the password received from HMI MICRO*/
+
+uint8 received_re_entered_pass_arr[5]; /*the array store the re-enterd password received from HMI MICRO*/
+
+uint8 two_received_password_arrays_equality = 1; /*this flag will be zero when the two passwords are not equal*/
+
+uint8 received_data_from_EEPROM[5];/*this array for store it data from EEPROM*/
+
+uint8 check_password[5];/*this array UART used it to receive password from HMI */
+
+uint8 timer_motor_tick=0;/*number of ticks for timer for motor*/
+
+uint8 received_pass_EEPROM=1;/*flag for checking that data matched*/
+
+uint8 check_change_received_pass_EEPROM=1;/*flag for check that password changed*/
+
+/*******************************************************************************
+| 							    Some Functions                            	   |
+ *******************************************************************************/
+
+/*
+ * Description:
+ * this function for make the code more easier or more readable that take the of
+ * keys (password) that user entered from keypad and then send it to UART as array
+ * of bytes.
+ *
+ */
+
+void uart_send_password (uint8 *arr){
+	for(uint8 i =0; i<5; i++){
+		UART_sendByte(arr[i]);
+	}
+}
+
+/*
+ * Description:
+ * this function receive the bytes from the UART byte by byte as an array of bytes
+ * for make a code more easier and readable, that receive the bytes from the UART and
+ * store it in the array that given to it by address to keep it is element safe through
+ * the program.
+ *
+ */
+void uart_receive_password(uint8 *arr){
+	for(uint8 j=0 ; j<5;j++){
+		arr[j] = UART_recieveByte();
+	}
+}/*End of the function*/
+
+/*
+ * Description:
+ * this function take three inputs from HMI and check if the arrays are rqual
+ * or not.
+ *
+ */
+void check_two_passwords(uint8 *arr1 , uint8 *arr2, uint8 * flag){
+	*flag = 1;
+	for(uint8 i = 0 ; i<5;i++){
+		if(arr1[i] != arr2[i]){
+			*flag = 0;
+		}
+	}
+}/*End of the function*/
+
+/*******************************************************************************
+ | 							    CallBack Functions                             |
+ *******************************************************************************/
+/*
+ * Description:
+ * this callback function was put and defined in the timer1 driver when the interrupt
+ * happen this function called by it is pointer that point to first line in it, when
+ * interrupt happen the function will increase the number of ticks that means count ticks
+ * until the program needed.
+ *
+ */
+void motor_rotate_callback (void){
+	timer_motor_tick ++;
+}/*End of the callback function*/
+
+
+
+/*******************************************************************************
+ | 							     Start Main Functions                          |
+ *******************************************************************************/
+int main(){
+
+	/*For Enable the Global interrupt bit ( I - BIT)*/
+	SREG |= (1<<7);
+	/*******************************************************************************
+| 								Local Variables                                |
+	 *******************************************************************************/
+
+	uint8 data_places_in_EEPROM = 0;/*flag check if data placed in EEPROM*/
+
+	uint8 uart_status_flag=0;/*THE VARIABLE THAT RECEIVED FROM HMI and switch on it */
+
+	uint8 password_one_received = 0;/*flag check that password one received from HMI*/
+
+	uint8 password_two_received = 0;/*flag check that password two received from HMI*/
+
+	uint8 pass_temp_var = 0;/*this temporary variable for receiving data from EERPOM */
+
+	uint8 check_pass_before_change[5];/*array store in it password for checking the user enter two equal password */
+
+	uint8 check_temp_pass = 1;/*this variable used for return data from EEPROM when want to change password */
+
+	uint8 receive_new_password_arrary1[5];/*array for receive the First new password to check before changed*/
+
+	uint8 receive_new_password_arrary2[5];/*array for receive the Second new password to check before changed*/
+
+	uint8 check_received_new_pass_array1 = 0; /*flag that this device receive the first new password before changed */
+
+	uint8 check_received_new_pass_array2 = 0;/*flag that this device receive the second new password before changed */
+
+	uint8 two_new_paswwords_are_equal = 1;/*flag for check that two new passwords are equal to confirm changed*/
+
+	/*******************************************************************************
+	 |  		Configurable Structure Will be Passed to Initialization Function   |
+	 *******************************************************************************/
+
+	/*
+	 * UART configuration :
+	 * 	1- The frame of data is 8 bit frame.
+	 * 	2- Not using parity check bit.
+	 * 	3- Using 1 stop bit.
+	 * 	4- Using Baud rate 9600.
+	 *
+	 */
+
+	UART_ConfigType uart_config_control = {Frame_8_bit,Parity_Disable,Stop_1_bit,Buad_Rate_9600};
+
+	/*
+	 * Timer 1 configuration :
+	 * 	1- Do not use normal mode so put zero in it.
+	 * 	2- put compare value in OCR1A from the equation of timer 1, put value = 15625.
+	 * 	3- using prescalar 1024.
+	 * 	4- Using mode of the timer it will be : Compare Mode.
+	 *
+	 */
+
+	Timer1_ConfigType timer_config_control = {0,7812,Prescalar_1024,Compare_Mode};
+
+	/*
+	 * I2C configuration :
+	 * 1- give the address for MICRO-Controller is 0X01.
+	 * 2- USING Baud Rate 400 KHZ this has a decimal value equal 2 put in the register
+	 *
+	 */
+
+	TWI_ConfigType i2c_config_control = {0X01,Bit_Rate_400KHZ};
+
+
+	/*******************************************************************************
+| 							Initialization Functions                           |
+	 *******************************************************************************/
+
+	/* this function prepare the UART to work with the uart_config_HMI inputs*/
+	UART_init(&uart_config_control);
+
+	/* this function prepare the TIMER1 to work with the timer_config_HMI inputs*/
+	Timer1_init(&timer_config_control);
+
+	/* this function prepare the I2C to work with the timer_config_HMI inputs*/
+	I2C_init(&i2c_config_control);
+
+	/* this function prepare the Motor to work with the timer_config_HMI inputs*/
+	DcMotor_Init();
+
+	/* this function prepare the Buzzer to work with the timer_config_HMI inputs*/
+	Buzzer_init();
+
+
+	/*******************************************************************************
+	 | 							Setup Callback Functions                           |
+	 *******************************************************************************/
+
+	/*the callback function that defined before */
+	Timer1_setCallBack(motor_rotate_callback);
+
+	/*============================================================================*/
+
+
+	while(1){
+
+		/*
+		 * this variable responsible for Switch on nay operation received by UART
+		 */
+		uart_status_flag = UART_recieveByte();
+
+		switch(uart_status_flag){
+
+		/*
+		 * this case check that the control ECU received first password entered by user
+		 * and answer by a flag
+		 *
+		 */
+
+		case PASSWORD_ONE_IS_RESIVED_Q:
+			password_one_received = 0;
+			uart_receive_password(received_pass_arr);
+			password_one_received = 1;
+			UART_sendByte(password_one_received);
+			break;
+
+			/*
+			 * this case check that the control ECU received second password entered by user
+			 * and answer by a flag
+			 *
+			 */
+
+		case PASSWORD_TWO_IS_RESIVED_Q:
+			password_two_received =0;
+			uart_receive_password(received_re_entered_pass_arr);
+			password_two_received = 1;
+			UART_sendByte(password_two_received);
+			break;
+
+			/*
+			 * this case check that two password are equals and send answer to HMI as a flag
+			 * and send this password to EEPROM to save it as loop because they are array
+			 * of bytes, and if not equals arrays send to HMI that two are not equal.
+			 *
+			 */
+
+		case ASK_UART_ABOUT_MATCHING_PASSWORDS:
+
+			check_two_passwords(received_pass_arr,received_re_entered_pass_arr,&two_received_password_arrays_equality);
+
+			if( two_received_password_arrays_equality == 1 ){
+
+				UART_sendByte(MATCHED);
+
+				for(data_places_in_EEPROM = 0; data_places_in_EEPROM < 5; data_places_in_EEPROM++){
+
+					EEPROM_writeByte(data_places_in_EEPROM,received_pass_arr[data_places_in_EEPROM]);
+
+					_delay_ms(10);
+				}
+				//two_received_password_arrays_equality=0;
+			}
+			else{
+
+				UART_sendByte(NOT_MATCHED);
+				two_received_password_arrays_equality=1;
+			}
+
+			break;
+
+			/*
+			 * this case used to check the password that user entered equal to the
+			 * password saved in it before, if matched send to HMI to able to the user
+			 * to continue if not tell user to enter again.
+			 *
+			 */
+
+		case SENDED_DATA_MATCHES_EEPROM:
+
+			uart_receive_password(check_password);
+
+			for(uint8 j =0; j<5;j++){
+
+				received_data_from_EEPROM[j] = EEPROM_readByte(j,&pass_temp_var);
+
+				if(check_password[j] != pass_temp_var){
+					received_pass_EEPROM = 0;
+					_delay_ms(10);
+				}
+
+
+			}
+
+			if(received_pass_EEPROM){
+				UART_sendByte(PASS_FETCH_IS_CORRECT);
+			}
+			else{
+				UART_sendByte(PASS_FETCH_IS_NOT_CORRECT);
+			}
+
+			break;
+
+			/*
+			 * after check that password that user entered matches that password
+			 * stored in EEPROM it will implement what the user choose in this case user
+			 * choose to open the door the motor will rotate CW for 15 second and stop for
+			 * 3 second then rotate A_CW for 15 second.
+			 *
+			 */
+
+		case DOOR_IS_OPEN:
+
+			Timer1_init(&timer_config_control);
+			DcMotor_Rotate(Motor_CW,100);
+			while(timer_motor_tick != 15){}
+			timer_motor_tick=0;
+			Timer1_deInit();
+
+
+			Timer1_init(&timer_config_control);
+			DcMotor_Rotate(Motor_Stop,0);
+			while(timer_motor_tick != 3)
+			DcMotor_Rotate(Motor_Stop,0);
+			timer_motor_tick=0;
+			Timer1_deInit();
+
+			Timer1_init(&timer_config_control);
+			DcMotor_Rotate(Motor_A_CW,100);
+			while(timer_motor_tick != 15)
+			DcMotor_Rotate(Motor_Stop,0);
+			timer_motor_tick=0;
+			Timer1_deInit();
+
+
+			break;
+
+			/*
+			 * this password check that the user enter the password matches to the password
+			 * entered before and stored in EEPROM if true send to HMI to allow to user to
+			 * change password, if not matched password not allowed and return to last screen.
+			 *
+			 */
+
+		case CHANGE_PASSWORD :
+
+			check_temp_pass=0;
+
+			received_pass_EEPROM = 1;
+
+			uart_receive_password(check_pass_before_change);
+
+			for(uint8 j =0; j<5;j++){
+
+				received_data_from_EEPROM[j] = EEPROM_readByte(j,&check_temp_pass);
+
+				if(check_pass_before_change[j] != check_temp_pass){
+					check_change_received_pass_EEPROM = 0;
+					_delay_ms(10);
+				}
+			}
+
+			if(check_change_received_pass_EEPROM){
+				UART_sendByte(CORRECT_PASSWORD);
+			}
+			else{
+				UART_sendByte(WRONG_PASSWORD);
+			}
+
+			break;
+
+			/*
+			 * this case for check that the first new password entered by user and
+			 * control ECU received it, then till HMI to move to next instruction
+			 *
+			 */
+
+		case CHECK_FIRST_NEW_PASSWORD:
+
+			uart_receive_password(receive_new_password_arrary1);
+
+			check_received_new_pass_array1 = 1;
+
+			UART_sendByte(check_received_new_pass_array1);
+
+			break;
+
+			/*
+			 * this case for check that the second new password entered by user and
+			 * control ECU received it, then till HMI to move to next instruction
+			 *
+			 */
+		case CHECK_SECONDE_NEW_PASSWORD:
+
+			uart_receive_password(receive_new_password_arrary2);
+
+			check_received_new_pass_array2 = 1;
+
+			UART_sendByte(check_received_new_pass_array2);
+
+			break;
+
+			/*
+			 * this password check that the two new password are matched and then store it
+			 * in a EEPROM as a password of the system, then till HMI by USART it is true or
+			 * not, if not it will ask user to enter again two matches passwords.
+			 *
+			 */
+
+		case CHECK_TWO_NEW_PASSWORD_ARE_EQUAL :
+
+			check_two_passwords(receive_new_password_arrary1,receive_new_password_arrary2,&two_new_paswwords_are_equal);
+
+			if(two_new_paswwords_are_equal){//1
+
+				UART_sendByte(MATCHED);
+
+				for(uint8 s=0; s<5;s++){
+
+					EEPROM_writeByte(s,receive_new_password_arrary1[s]);
+					_delay_ms(10);
+
+				}
+
+			}
+			else{//0
+				UART_sendByte(NOT_MATCHED);
+			}
+
+			break;
+
+			/*
+			 * this case if the user enter wrong password and take 3 times to enter right password
+			 * if the user can not enter the password, HMI tell control ECU through UART to
+			 * implement this case and return after 1 minute
+			 *
+			 */
+
+		case ATTENTION_MODE:
+
+			Timer1_init(&timer_config_control);
+			while(timer_motor_tick != 60){
+				Buzzer_on();
+			}
+			Buzzer_off();
+			timer_motor_tick = 0;
+			Timer1_deInit();
+
+
+			break;
+
+		}
+
+
+
+	}
+}
+

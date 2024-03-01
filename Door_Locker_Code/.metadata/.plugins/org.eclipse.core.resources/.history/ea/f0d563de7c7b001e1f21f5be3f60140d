@@ -1,0 +1,151 @@
+ /******************************************************************************
+ * 																			   *
+ * 					Author: Abdelrhman Khaled Sobhi			     			   *
+ *																			   *
+ * 								Group : 79								       *
+ *																			   *
+ *******************************************************************************/
+
+#include "avr/io.h"
+#include "avr/interrupt.h"
+#include "std_types.h"
+#include "timer1.h"
+
+/*******************************************************************************
+ | 							   Global Variable			          		       |
+ *******************************************************************************/
+
+static void (*ptr_callback) (void) = NULL_PTR;
+
+
+/*******************************************************************************
+ | 									  ISR	          	         			   |
+ *******************************************************************************/
+
+/*
+ * This is the ISR of the normal mode when the overflow occur the interrupt will
+ * happen and then will jump to this ISR in vector table to implement it
+ *
+ */
+ISR (TIMER1_OVF_vect){
+
+	if(ptr_callback != NULL_PTR){
+		(*ptr_callback) ();
+	}
+}
+
+/*
+ * This is the ISR of the compare mode when the overflow occur the interrupt will
+ * happen and then will jump to this ISR in vector table to implement it
+ *
+ */
+
+ISR (TIMER1_COMPA_vect){
+
+	if(ptr_callback != NULL_PTR){
+			(*ptr_callback) ();
+		}
+}
+
+/*******************************************************************************
+ | 							   		Functions			          		       |
+ *******************************************************************************/
+
+/*
+ * Description :
+ *
+ * 1- function takes an argument as  a pointer to type of structure for modification
+ * 2- first put the initial value  of the TCNT register by zer0 or any value according
+ * 	  to the value that needed to start from it.
+ * 3- check if the mode is compare then modify the timer1 for work in compare mode
+ * 4- any thing else modify the timer1 in normal mode (overflow mode)
+ *
+ */
+
+void Timer1_init(const Timer1_ConfigType * Config_Ptr){
+
+	/*
+	 * First put the initial value of the timer in TCNT1 by the user zero or any
+	 * value
+	 *
+	 */
+	TCNT1 = Config_Ptr->initial_value;
+
+	if(Config_Ptr->mode == Compare_Mode){
+
+		// This pin set to 1 in any mode not PWM
+		TCCR1A = (1<<FOC1A);
+
+		/*
+		 * 1- set up the prescalar by put the first 3 bit in the TCCR1B equal 1,
+		 *    this made by do AND operation for the value with 0x07 to take first
+		 *    three bits in it is value.
+		 *
+		 * 2- Then modify the mode of the register to work in compare mode by choose
+		 * 	   mode 4 from timer1 (in data sheet) so to put pin WGM12 take the compare
+		 * 	   value mode from enum and shift it to left by 1.
+		 */
+		TCCR1B = (Config_Ptr->prescaler) | (Config_Ptr->mode);
+
+		// Enable Output Compare A Match Interrupt
+		TIMSK |= (1<<OCIE1A);
+
+		/*
+		 * put the compare value that need timer count to it.
+		 */
+		OCR1A = Config_Ptr->compare_value;
+
+	}
+	else{
+
+		// This pin set to 1 in any mode not PWM
+		TCCR1A = (1<<FOC1A);
+
+		/*
+		 * 1- setup the timer to work in normal mode (overflow mode)
+		 *
+		 * 2- set up the prescalar by put the first 3 bit in the TCCR1B equal 1,
+		 *    this made by do AND operation for the value with 0x07 to take first
+		 *    three bits in it is value.
+		 *
+		 * 3- for normal mode we do not need to enable any other bits in this register
+		 */
+		TCCR1B = Config_Ptr->prescaler;
+
+		// Enable Overflow Interrupt
+		TIMSK |= (1<<TOIE1);
+	}
+}
+
+/*
+ * Description :
+ *
+ * this function for stop the timer1 and reset the value in TCNT1.
+ *
+ */
+
+void Timer1_deInit(void){
+
+	/*
+	 * put TCNT1 = 0 for reset the value in it and start again from 0 when initialized
+	 */
+	TCNT1  = 0;
+
+	/*
+	 * put TCCR1B = 0 for preventing the clock from the timer1 (No Clock)
+	 */
+	TCCR1B = 0;
+}
+
+/*
+ * Description :
+ *
+ * this is the callback function will  called when interrupt happen by it is pointer
+ *
+ */
+
+void Timer1_setCallBack(void(*a_ptr)(void)){
+
+	ptr_callback = a_ptr;
+
+}
